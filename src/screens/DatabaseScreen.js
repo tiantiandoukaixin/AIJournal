@@ -10,7 +10,8 @@ import {
   FlatList,
   RefreshControl,
   ActivityIndicator,
-  TextInput
+  TextInput,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DatabaseService from '../services/DatabaseService';
@@ -78,18 +79,38 @@ export default function DatabaseScreen() {
 
   useEffect(() => {
     loadTableCounts();
+    
+    // 监听localStorage变化，自动刷新表统计
+    const handleStorageChange = () => {
+      console.log('🔄 检测到localStorage变化，刷新表统计...');
+      loadTableCounts();
+    };
+    
+    // 添加storage事件监听器
+    window.addEventListener('storage', handleStorageChange);
+    
+    // 添加自定义事件监听器（用于同一页面内的localStorage变化）
+    window.addEventListener('localStorageUpdate', handleStorageChange);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('localStorageUpdate', handleStorageChange);
+    };
   }, []);
 
   const loadTableCounts = async () => {
     try {
       const counts = {};
+      console.log('🔍 开始加载表统计...');
       for (const tableName of Object.keys(TABLE_CONFIGS)) {
         const data = await DatabaseService.getTableData(tableName);
         counts[tableName] = data.length;
+        console.log(`📊 ${tableName}: ${data.length} 条记录`, data.slice(0, 2)); // 显示前2条记录用于调试
       }
       setTableCounts(counts);
+      console.log('✅ 表统计加载完成:', counts);
     } catch (error) {
-      console.error('加载表统计失败:', error);
+      console.error('❌ 加载表统计失败:', error);
     }
   };
 
@@ -145,23 +166,35 @@ export default function DatabaseScreen() {
       }
 
       if (result.success) {
-        Alert.alert(
-          '导出成功',
-          `文件已保存: ${result.fileName}`,
-          [
-            { text: '确定' },
-            {
-              text: '分享',
-              onPress: () => ExportService.shareFile(result.filePath)
-            }
-          ]
-        );
+        if (Platform.OS === 'web') {
+          window.alert(`导出成功！文件已保存: ${result.fileName}`);
+        } else {
+          Alert.alert(
+            '导出成功',
+            `文件已导出: ${result.fileName}`,
+            [
+              { text: '确定' },
+              {
+                text: '保存到手机',
+                onPress: () => ExportService.saveToPhoneStorage(result.filePath, result.fileName)
+              }
+            ]
+          );
+        }
       } else {
-        Alert.alert('导出失败', result.error);
+        if (Platform.OS === 'web') {
+          window.alert('导出失败: ' + result.error);
+        } else {
+          Alert.alert('导出失败', result.error);
+        }
       }
     } catch (error) {
       console.error('导出失败:', error);
-      Alert.alert('导出失败', error.message);
+      if (Platform.OS === 'web') {
+        window.alert('导出失败: ' + error.message);
+      } else {
+        Alert.alert('导出失败', error.message);
+      }
     } finally {
       setExportLoading(false);
     }
@@ -172,63 +205,153 @@ export default function DatabaseScreen() {
     try {
       const result = await ExportService.exportAllData();
       if (result.success) {
-        Alert.alert(
-          '导出成功',
-          `完整数据已保存: ${result.fileName}`,
-          [
-            { text: '确定' },
-            {
-              text: '分享',
-              onPress: () => ExportService.shareFile(result.filePath)
-            }
-          ]
-        );
+        if (Platform.OS === 'web') {
+          window.alert(`导出成功！完整数据已保存: ${result.fileName}`);
+        } else {
+          Alert.alert(
+            '导出成功',
+            `完整数据已导出: ${result.fileName}`,
+            [
+              { text: '确定' },
+              {
+                text: '保存到手机',
+                onPress: () => ExportService.saveToPhoneStorage(result.filePath, result.fileName)
+              }
+            ]
+          );
+        }
       } else {
-        Alert.alert('导出失败', result.error);
+        if (Platform.OS === 'web') {
+          window.alert('导出失败: ' + result.error);
+        } else {
+          Alert.alert('导出失败', result.error);
+        }
       }
     } catch (error) {
       console.error('导出失败:', error);
-      Alert.alert('导出失败', error.message);
+      if (Platform.OS === 'web') {
+        window.alert('导出失败: ' + error.message);
+      } else {
+        Alert.alert('导出失败', error.message);
+      }
     } finally {
       setExportLoading(false);
     }
   };
 
   const showPreferenceInfo = () => {
-    Alert.alert(
-      '偏好记录说明',
-      '关于偏好记录的处理机制：\n\n' +
-      '🔍 智能去重：系统会自动检测同一项目的矛盾偏好（如同时"喜欢"和"不喜欢"西兰花）\n\n' +
-      '⏰ 保留最新：当发现矛盾时，系统会保留最新的偏好记录，删除旧的矛盾记录\n\n' +
-      '🔄 自动清理：每次启动应用时，系统会自动清理矛盾的偏好记录\n\n' +
-      '💡 这样设计是为了确保您的偏好记录保持一致性，避免出现逻辑矛盾。',
-      [{ text: '了解了', style: 'default' }]
-    );
+    const message = '关于偏好记录的智能管理机制：\n\n' +
+      '📝 记录方式：\n' +
+      '• 支持记录对任何事物的喜好程度（喜欢/不喜欢/中性）\n' +
+      '• 可以添加详细的备注说明，记录喜好的原因\n' +
+      '• 支持强度等级设置，精确表达喜好程度\n\n' +
+      '🔍 智能去重机制：\n' +
+      '• 系统会自动检测同一项目的矛盾偏好记录\n' +
+      '• 例如：同时存在"喜欢西兰花"和"不喜欢西兰花"\n' +
+      '• 智能识别相似表述，如"苹果"和"红苹果"\n\n' +
+      '⏰ 时间优先原则：\n' +
+      '• 当发现矛盾偏好时，系统保留最新的记录\n' +
+      '• 自动删除过时的矛盾记录，保持数据一致性\n' +
+      '• 支持手动编辑和更新偏好强度\n\n' +
+      '🔄 自动维护：\n' +
+      '• 每次启动应用时自动清理矛盾记录\n' +
+      '• 定期整理和优化数据库结构\n' +
+      '• 保证查询效率和数据准确性\n\n' +
+      '📊 数据分析：\n' +
+      '• 支持按分类查看偏好分布\n' +
+      '• 可以导出完整的偏好数据进行分析\n' +
+      '• 帮助了解个人喜好变化趋势\n\n' +
+      '🎯 应用场景：\n' +
+      '• 饮食偏好：记录喜欢的菜品、食材、口味\n' +
+      '• 娱乐偏好：电影、音乐、书籍、游戏等\n' +
+      '• 生活偏好：颜色、风格、品牌、活动等\n' +
+      '• 工作偏好：工具、方法、环境、时间等\n\n' +
+      '💡 设计理念：\n' +
+      '通过智能化的偏好管理，帮助您更好地了解自己，\n' +
+      '为AI助手提供准确的个性化服务基础，\n' +
+      '让每一次交互都更贴合您的真实需求。';
+    
+    if (Platform.OS === 'web') {
+      window.alert('偏好记录详细说明\n\n' + message);
+    } else {
+      Alert.alert(
+        '偏好记录详细说明',
+        message,
+        [{ text: '了解了', style: 'default' }]
+      );
+    }
   };
 
   const deleteRecord = async (id) => {
-    Alert.alert(
-      '确认删除',
-      '确定要删除这条记录吗？',
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await DatabaseService.deleteRecord(selectedTable, id);
+    console.log(`[DEBUG] deleteRecord函数被调用: ID=${id}, 类型=${typeof id}`);
+    
+    try {
+      if (Platform.OS === 'web') {
+        // Web环境使用原生confirm对话框
+        const confirmed = window.confirm('删除后不可恢复，确定要删除这条记录吗？');
+        console.log(`[DEBUG] Web确认对话框结果: ${confirmed}`);
+        
+        if (confirmed) {
+          try {
+            console.log(`[DEBUG] 用户确认删除: 表=${selectedTable}, ID=${id}`);
+            const result = await DatabaseService.deleteRecord(selectedTable, id);
+            console.log(`[DEBUG] 删除操作返回结果:`, result);
+            
+            if (result && result.success) {
               await loadTableData(selectedTable);
               await loadTableCounts();
-              Alert.alert('成功', '记录已删除');
-            } catch (error) {
-              console.error('删除失败:', error);
-              Alert.alert('错误', '删除失败');
+              window.alert(`记录已删除 (删除了 ${result.deletedCount} 条记录)`);
+            } else {
+              console.error('[ERROR] 删除失败，返回结果:', result);
+              window.alert(result?.error || '删除失败');
             }
+          } catch (error) {
+            console.error('[ERROR] 删除操作异常:', error);
+            window.alert('删除失败: ' + error.message);
           }
+        } else {
+          console.log('[DEBUG] 用户取消删除');
         }
-      ]
-    );
+      } else {
+        // 移动端使用React Native Alert
+        Alert.alert(
+          '确认删除',
+          '删除后不可恢复，确定要删除这条记录吗？',
+          [
+            { 
+              text: '取消', 
+              style: 'cancel',
+              onPress: () => console.log('[DEBUG] 用户取消删除')
+            },
+            {
+              text: '删除',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  console.log(`[DEBUG] 用户确认删除: 表=${selectedTable}, ID=${id}`);
+                  const result = await DatabaseService.deleteRecord(selectedTable, id);
+                  console.log(`[DEBUG] 删除操作返回结果:`, result);
+                  
+                  if (result && result.success) {
+                    await loadTableData(selectedTable);
+                    await loadTableCounts();
+                    Alert.alert('成功', `记录已删除 (删除了 ${result.deletedCount} 条记录)`);
+                  } else {
+                    console.error('[ERROR] 删除失败，返回结果:', result);
+                    Alert.alert('错误', result?.error || '删除失败');
+                  }
+                } catch (error) {
+                  console.error('[ERROR] 删除操作异常:', error);
+                  Alert.alert('错误', '删除失败: ' + error.message);
+                }
+              }
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('[ERROR] 删除确认对话框调用失败:', error);
+    }
   };
 
   const openAddModal = () => {
@@ -255,11 +378,34 @@ export default function DatabaseScreen() {
           occupation: '', 
           health_status: '', 
           chronic_diseases: '', 
+          medical_history: '', 
+          family_medical_history: '', 
           height: '', 
           weight: '', 
+          bmi: '', 
+          blood_pressure: '', 
+          heart_rate: '', 
+          blood_sugar: '', 
           blood_type: '', 
+          vision: '', 
+          hearing: '', 
           allergies: '', 
-          medications: '' 
+          medications: '', 
+          supplements: '', 
+          exercise_habits: '', 
+          sleep_pattern: '', 
+          smoking_status: '', 
+          drinking_habits: '', 
+          diet_restrictions: '', 
+          mental_health: '', 
+          stress_level: '', 
+          education: '', 
+          relationship_status: '', 
+          family_info: '', 
+          contact_info: '', 
+          emergency_contact: '', 
+          insurance_info: '', 
+          doctor_info: '' 
         };
       case 'preferences':
         return { category: '', item: '', preference_type: 'like', intensity: '5' };
@@ -287,11 +433,34 @@ export default function DatabaseScreen() {
           occupation: parsedItem.occupation || '',
           health_status: parsedItem.health_status || '',
           chronic_diseases: parsedItem.chronic_diseases || '',
+          medical_history: parsedItem.medical_history || '',
+          family_medical_history: parsedItem.family_medical_history || '',
           height: parsedItem.height || '',
           weight: parsedItem.weight || '',
+          bmi: parsedItem.bmi || '',
+          blood_pressure: parsedItem.blood_pressure || '',
+          heart_rate: parsedItem.heart_rate || '',
+          blood_sugar: parsedItem.blood_sugar || '',
           blood_type: parsedItem.blood_type || '',
+          vision: parsedItem.vision || '',
+          hearing: parsedItem.hearing || '',
           allergies: parsedItem.allergies || '',
-          medications: parsedItem.medications || ''
+          medications: parsedItem.medications || '',
+          supplements: parsedItem.supplements || '',
+          exercise_habits: parsedItem.exercise_habits || '',
+          sleep_pattern: parsedItem.sleep_pattern || '',
+          smoking_status: parsedItem.smoking_status || '',
+          drinking_habits: parsedItem.drinking_habits || '',
+          diet_restrictions: parsedItem.diet_restrictions || '',
+          mental_health: parsedItem.mental_health || '',
+          stress_level: parsedItem.stress_level || '',
+          education: parsedItem.education || '',
+          relationship_status: parsedItem.relationship_status || '',
+          family_info: parsedItem.family_info || '',
+          contact_info: parsedItem.contact_info || '',
+          emergency_contact: parsedItem.emergency_contact || '',
+          insurance_info: parsedItem.insurance_info || '',
+          doctor_info: parsedItem.doctor_info || ''
         };
       case 'preferences':
         return {
@@ -517,7 +686,8 @@ export default function DatabaseScreen() {
     switch (selectedTable) {
       case 'personal_info':
         return (
-          <View>
+          <ScrollView style={styles.formContainer}>
+            <Text style={styles.sectionTitle}>基本信息</Text>
             <View style={styles.formField}>
               <Text style={styles.fieldLabel}>姓名</Text>
               <TextInput
@@ -555,7 +725,306 @@ export default function DatabaseScreen() {
                 placeholder="请输入职业"
               />
             </View>
-          </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>教育背景</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.education || ''}
+                onChangeText={(value) => updateFormData('education', value)}
+                placeholder="请输入教育背景"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>感情状况</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.relationship_status || ''}
+                onChangeText={(value) => updateFormData('relationship_status', value)}
+                placeholder="请输入感情状况"
+              />
+            </View>
+            
+            <Text style={styles.sectionTitle}>健康信息</Text>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>健康状况</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.health_status || ''}
+                onChangeText={(value) => updateFormData('health_status', value)}
+                placeholder="请输入整体健康状况"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>身高 (cm)</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.height || ''}
+                onChangeText={(value) => updateFormData('height', value)}
+                placeholder="请输入身高"
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>体重 (kg)</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.weight || ''}
+                onChangeText={(value) => updateFormData('weight', value)}
+                placeholder="请输入体重"
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>BMI</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.bmi || ''}
+                onChangeText={(value) => updateFormData('bmi', value)}
+                placeholder="请输入BMI指数"
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>血压</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.blood_pressure || ''}
+                onChangeText={(value) => updateFormData('blood_pressure', value)}
+                placeholder="如：120/80"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>心率 (次/分钟)</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.heart_rate || ''}
+                onChangeText={(value) => updateFormData('heart_rate', value)}
+                placeholder="请输入心率"
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>血糖</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.blood_sugar || ''}
+                onChangeText={(value) => updateFormData('blood_sugar', value)}
+                placeholder="请输入血糖水平"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>血型</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.blood_type || ''}
+                onChangeText={(value) => updateFormData('blood_type', value)}
+                placeholder="如：A型、B型、AB型、O型"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>视力状况</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.vision || ''}
+                onChangeText={(value) => updateFormData('vision', value)}
+                placeholder="请输入视力状况"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>听力状况</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.hearing || ''}
+                onChangeText={(value) => updateFormData('hearing', value)}
+                placeholder="请输入听力状况"
+              />
+            </View>
+            
+            <Text style={styles.sectionTitle}>医疗信息</Text>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>慢性疾病</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.chronic_diseases || ''}
+                onChangeText={(value) => updateFormData('chronic_diseases', value)}
+                placeholder="请输入慢性疾病信息"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>既往病史</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.medical_history || ''}
+                onChangeText={(value) => updateFormData('medical_history', value)}
+                placeholder="请输入既往病史和手术史"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>家族病史</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.family_medical_history || ''}
+                onChangeText={(value) => updateFormData('family_medical_history', value)}
+                placeholder="请输入家族病史"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>过敏信息</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.allergies || ''}
+                onChangeText={(value) => updateFormData('allergies', value)}
+                placeholder="请输入过敏信息"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>用药信息</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.medications || ''}
+                onChangeText={(value) => updateFormData('medications', value)}
+                placeholder="请输入正在服用的药物"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>保健品</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.supplements || ''}
+                onChangeText={(value) => updateFormData('supplements', value)}
+                placeholder="请输入正在服用的保健品"
+                multiline
+              />
+            </View>
+            
+            <Text style={styles.sectionTitle}>生活习惯</Text>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>运动习惯</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.exercise_habits || ''}
+                onChangeText={(value) => updateFormData('exercise_habits', value)}
+                placeholder="请输入运动习惯"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>睡眠模式</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.sleep_pattern || ''}
+                onChangeText={(value) => updateFormData('sleep_pattern', value)}
+                placeholder="请输入睡眠模式"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>吸烟状况</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.smoking_status || ''}
+                onChangeText={(value) => updateFormData('smoking_status', value)}
+                placeholder="如：不吸烟、偶尔吸烟、经常吸烟"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>饮酒习惯</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.drinking_habits || ''}
+                onChangeText={(value) => updateFormData('drinking_habits', value)}
+                placeholder="请输入饮酒习惯"
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>饮食限制</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.diet_restrictions || ''}
+                onChangeText={(value) => updateFormData('diet_restrictions', value)}
+                placeholder="请输入饮食限制或特殊饮食"
+                multiline
+              />
+            </View>
+            
+            <Text style={styles.sectionTitle}>心理健康</Text>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>心理健康状况</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.mental_health || ''}
+                onChangeText={(value) => updateFormData('mental_health', value)}
+                placeholder="请输入心理健康状况"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>压力水平</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.stress_level || ''}
+                onChangeText={(value) => updateFormData('stress_level', value)}
+                placeholder="如：低、中、高"
+              />
+            </View>
+            
+            <Text style={styles.sectionTitle}>联系信息</Text>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>家庭信息</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.family_info || ''}
+                onChangeText={(value) => updateFormData('family_info', value)}
+                placeholder="请输入家庭成员信息"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>联系方式</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.contact_info || ''}
+                onChangeText={(value) => updateFormData('contact_info', value)}
+                placeholder="请输入联系方式"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>紧急联系人</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.emergency_contact || ''}
+                onChangeText={(value) => updateFormData('emergency_contact', value)}
+                placeholder="请输入紧急联系人信息"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>保险信息</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.insurance_info || ''}
+                onChangeText={(value) => updateFormData('insurance_info', value)}
+                placeholder="请输入保险信息"
+                multiline
+              />
+            </View>
+            <View style={styles.formField}>
+              <Text style={styles.fieldLabel}>医生信息</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={formData.doctor_info || ''}
+                onChangeText={(value) => updateFormData('doctor_info', value)}
+                placeholder="请输入主治医生或常去医院信息"
+                multiline
+              />
+            </View>
+          </ScrollView>
         );
 
       case 'preferences':
@@ -985,7 +1454,10 @@ export default function DatabaseScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.deleteButton}
-              onPress={() => deleteRecord(item.id)}
+              onPress={() => {
+                console.log(`[DEBUG] 删除按钮被点击: ID=${item.id}, 类型=${typeof item.id}`);
+                deleteRecord(item.id);
+              }}
             >
               <Ionicons name="trash-outline" size={16} color="#FF3B30" />
             </TouchableOpacity>
@@ -1030,23 +1502,25 @@ export default function DatabaseScreen() {
         }
       >
         <View style={styles.exportSection}>
-          <TouchableOpacity
-            style={styles.exportAllButton}
-            onPress={exportAllData}
-            disabled={exportLoading}
-          >
-            <Ionicons name="cloud-download-outline" size={20} color="white" />
-            <Text style={styles.exportAllText}>导出所有数据</Text>
-            {exportLoading && <ActivityIndicator size="small" color="white" style={{ marginLeft: 8 }} />}
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.cleanupButton}
-            onPress={showPreferenceInfo}
-          >
-            <Ionicons name="information-circle-outline" size={20} color="#007AFF" />
-            <Text style={styles.cleanupText}>偏好记录说明</Text>
-          </TouchableOpacity>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={styles.exportAllButton}
+              onPress={exportAllData}
+              disabled={exportLoading}
+            >
+              <Ionicons name="cloud-download-outline" size={20} color="#2C2C2E" />
+              <Text style={styles.exportAllText}>导出所有数据</Text>
+              {exportLoading && <ActivityIndicator size="small" color="#2C2C2E" style={{ marginLeft: 8 }} />}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cleanupButton}
+              onPress={showPreferenceInfo}
+            >
+              <Ionicons name="information-circle-outline" size={20} color="#2C2C2E" />
+              <Text style={styles.cleanupText}>偏好记录说明</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.tablesGrid}>
@@ -1227,35 +1701,59 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginBottom: 20,
   },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   exportAllButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FFFFFF',
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E5E7',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   exportAllText: {
-    color: 'white',
+    color: '#2C2C2E',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
   },
   cleanupButton: {
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
+    flex: 1,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#E5E5E7',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   cleanupText: {
-    color: '#007AFF',
+    color: '#2C2C2E',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
@@ -1410,11 +1908,26 @@ const styles = StyleSheet.create({
   },
   textInput: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  formContainer: {
+    flex: 1,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+    marginBottom: 10,
+    paddingHorizontal: 5,
   },
   textArea: {
     height: 80,

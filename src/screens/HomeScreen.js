@@ -9,14 +9,20 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
-  Dimensions
+  Dimensions,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatabaseService from '../services/DatabaseService';
 import DeepSeekService from '../services/DeepSeekService';
 import VoiceService from '../services/VoiceService';
 
 const { width } = Dimensions.get('window');
+
+const STORAGE_KEYS = {
+  VOICE_ENABLED: 'voice_enabled'
+};
 
 export default function HomeScreen() {
   const [journalText, setJournalText] = useState('');
@@ -74,31 +80,51 @@ export default function HomeScreen() {
 
   const handleCleanupData = async () => {
     console.log('🔧 清理按钮被点击');
-    Alert.alert(
-      '清理重复数据',
-      '这将清理数据库中的重复记录，保留最新的数据。是否继续？',
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '确定',
-          onPress: async () => {
-            try {
-              console.log('🚀 开始执行数据清理');
-              setIsLoading(true);
-              await DatabaseService.cleanupDuplicateData();
-              await loadRecentData();
-              console.log('✅ 数据清理完成');
-              Alert.alert('成功', '数据清理完成！');
-            } catch (error) {
-              console.error('❌ 数据清理失败:', error);
-              Alert.alert('错误', '数据清理失败，请稍后重试');
-            } finally {
-              setIsLoading(false);
+    
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('这将清理数据库中的重复记录，保留最新的数据。是否继续？');
+      if (confirmed) {
+        try {
+          console.log('🚀 开始执行数据清理');
+          setIsLoading(true);
+          await DatabaseService.cleanupDuplicateData();
+          await loadRecentData();
+          console.log('✅ 数据清理完成');
+          window.alert('数据清理完成！');
+        } catch (error) {
+          console.error('❌ 数据清理失败:', error);
+          window.alert('数据清理失败，请稍后重试');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    } else {
+      Alert.alert(
+        '清理重复数据',
+        '这将清理数据库中的重复记录，保留最新的数据。是否继续？',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '确定',
+            onPress: async () => {
+              try {
+                console.log('🚀 开始执行数据清理');
+                setIsLoading(true);
+                await DatabaseService.cleanupDuplicateData();
+                await loadRecentData();
+                console.log('✅ 数据清理完成');
+                Alert.alert('成功', '数据清理完成！');
+              } catch (error) {
+                console.error('❌ 数据清理失败:', error);
+                Alert.alert('错误', '数据清理失败，请稍后重试');
+              } finally {
+                setIsLoading(false);
+              }
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const handleSaveJournal = async () => {
@@ -207,19 +233,109 @@ export default function HomeScreen() {
       setIsRecording(false);
       
       if (audioUri) {
-        Alert.alert(
-          '录音完成',
-          '语音识别功能需要集成第三方服务，请手动输入文字内容',
-          [{ text: '确定' }]
-        );
+        // 开始语音识别
+        setIsLoading(true);
+        try {
+          const result = await VoiceService.speechToText(audioUri);
+          
+          if (result.success && result.text) {
+             // 将识别结果添加到现有文本中
+             const newText = journalText ? journalText + ' ' + result.text : result.text;
+             setJournalText(newText);
+             Alert.alert('语音识别成功', `识别结果：${result.text}`);
+           } else {
+             // 针对网络错误提供重试和手动输入选项
+             if (result.message && (result.message.includes('网络连接失败') || result.message.includes('网络') || result.message.includes('Google服务'))) {
+               Alert.alert(
+                 '语音识别失败',
+                 result.message,
+                 [
+                   { text: '手动输入', onPress: () => {
+                     // 在移动端，可以通过ref聚焦到文本输入框
+                     // 这里暂时只提示用户手动输入
+                     Alert.alert('提示', '请在下方文本框中手动输入您的内容');
+                   }},
+                   { text: '重试', onPress: () => handleVoiceRecord() }
+                 ]
+               );
+             } else {
+               Alert.alert('语音识别失败', result.message || '未能识别语音内容');
+             }
+           }
+        } catch (error) {
+          console.error('语音识别过程出错:', error);
+          Alert.alert('错误', '语音识别过程中出现错误');
+        } finally {
+          setIsLoading(false);
+        }
       }
     } else {
-      // 开始录音
-      const success = await VoiceService.startRecording();
-      if (success) {
+      // 在Web环境下，直接使用语音识别而不需要录音
+      if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
         setIsRecording(true);
+        try {
+          const result = await VoiceService.startDirectSpeechRecognition();
+          
+          if (result.success && result.text) {
+             // 将识别结果添加到现有文本中
+             const newText = journalText ? journalText + ' ' + result.text : result.text;
+             setJournalText(newText);
+             Alert.alert('语音识别成功', `识别结果：${result.text}`);
+           } else {
+             // 针对网络错误提供重试和手动输入选项
+             if (result.message && (result.message.includes('网络连接') || result.message.includes('网络') || result.message.includes('Google服务'))) {
+               Alert.alert(
+                 '语音识别失败',
+                 result.message,
+                 [
+                   { text: '手动输入', onPress: () => {
+                     // 聚焦到文本输入框
+                     const textInput = document.querySelector('textarea, input[type="text"]');
+                     if (textInput) {
+                       textInput.focus();
+                     }
+                   }},
+                   { text: '重试', onPress: () => setTimeout(() => handleVoiceRecord(), 1000) }
+                 ]
+               );
+             } else {
+               Alert.alert('语音识别失败', result.message || '未能识别语音内容');
+             }
+           }
+        } catch (error) {
+          console.error('语音识别过程出错:', error);
+          const errorMsg = error.message || '语音识别失败';
+          
+          // 检查是否为网络错误，提供重试和手动输入选项
+          if (errorMsg.includes('网络连接') || errorMsg.includes('网络') || errorMsg.includes('Google服务')) {
+            Alert.alert(
+              '语音识别失败',
+              '语音识别服务连接失败。Web Speech API依赖Google服务，在国内可能无法正常使用。',
+              [
+                { text: '手动输入', onPress: () => {
+                  // 聚焦到文本输入框
+                  const textInput = document.querySelector('textarea, input[type="text"]');
+                  if (textInput) {
+                    textInput.focus();
+                  }
+                }},
+                { text: '重试', onPress: () => setTimeout(() => handleVoiceRecord(), 1000) }
+              ]
+            );
+          } else {
+            Alert.alert('错误', '语音识别过程中出现错误');
+          }
+        } finally {
+          setIsRecording(false);
+        }
       } else {
-        Alert.alert('错误', '无法开始录音，请检查麦克风权限');
+        // 移动端开始录音
+        const success = await VoiceService.startRecording();
+        if (success) {
+          setIsRecording(true);
+        } else {
+          Alert.alert('错误', '无法开始录音，请检查麦克风权限');
+        }
       }
     }
   };
@@ -253,12 +369,52 @@ export default function HomeScreen() {
       // 保存聊天记录
       await DatabaseService.insertChatHistory(userMessage, aiResponse, Date.now().toString());
       
-      // 语音播放AI回复
-      await VoiceService.speakText(aiResponse);
+      // 检查语音设置并播放AI回复
+      try {
+        const savedVoiceEnabled = await AsyncStorage.getItem(STORAGE_KEYS.VOICE_ENABLED);
+        const voiceEnabled = savedVoiceEnabled !== null ? JSON.parse(savedVoiceEnabled) : true; // 默认启用
+        
+        if (voiceEnabled) {
+          console.log('🔊 语音播放已启用，使用年轻女性声音播放AI回复');
+          // 使用专门优化的年轻女性声音
+          await VoiceService.speakWithFemaleVoice(aiResponse);
+        } else {
+          console.log('🔇 语音播放已禁用，跳过语音播放');
+        }
+      } catch (voiceError) {
+        console.error('语音播放失败:', voiceError);
+        // 语音播放失败不影响聊天功能
+      }
     } catch (error) {
       console.error('聊天失败:', error);
       const errorMessage = { role: 'assistant', content: '抱歉，我现在有点忙，稍后再聊好吗？', timestamp: new Date() };
       setChatMessages([...newMessages, errorMessage]);
+    }
+  };
+
+  const deleteChatMessage = (index) => {
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('确定要删除这条消息吗？');
+      if (confirmed) {
+        const newMessages = chatMessages.filter((_, i) => i !== index);
+        setChatMessages(newMessages);
+      }
+    } else {
+      Alert.alert(
+        '确认删除',
+        '确定要删除这条消息吗？',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '删除',
+            style: 'destructive',
+            onPress: () => {
+              const newMessages = chatMessages.filter((_, i) => i !== index);
+              setChatMessages(newMessages);
+            }
+          }
+        ]
+      );
     }
   };
 
@@ -343,7 +499,7 @@ export default function HomeScreen() {
 
     return (
       <View key={index} style={styles.recentEntry}>
-        <Ionicons name={getEntryIcon(entry.type)} size={20} color="#007AFF" />
+        <Ionicons name={getEntryIcon(entry.type)} size={20} color="#34C759" />
         <View style={styles.entryContent}>
           <Text style={styles.entryTitle}>{getEntryTitle(entry, entryData)}</Text>
           <Text style={styles.entryText} numberOfLines={2}>{getEntryContent(entry, entryData)}</Text>
@@ -356,21 +512,24 @@ export default function HomeScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>我的数据</Text>
-        <Text style={styles.subtitle}>记录生活，了解自己</Text>
+        <View style={styles.titleContainer}>
+          <Ionicons name="heart" size={32} color="#FF6B6B" style={styles.titleIcon} />
+          <Text style={styles.title}>心灵驿站</Text>
+        </View>
+        <Text style={styles.subtitle}>聆听内心，记录时光</Text>
       </View>
 
       {/* 主要功能按钮 */}
       <View style={styles.mainButtons}>
         <TouchableOpacity style={styles.primaryButton} onPress={handleSaveJournal} disabled={isLoading}>
-          <Ionicons name="create-outline" size={24} color="white" />
-          <Text style={styles.primaryButtonText}>记录生活</Text>
-          {isLoading && <ActivityIndicator size="small" color="white" style={{ marginLeft: 8 }} />}
+          <Ionicons name="create-outline" size={24} color="#2C2C2E" />
+          <Text style={styles.primaryButtonText}>诗意记录</Text>
+          {isLoading && <ActivityIndicator size="small" color="#2C2C2E" style={{ marginLeft: 8 }} />}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.secondaryButton} onPress={handleChatWithYuMiao}>
-          <Ionicons name="chatbubble-outline" size={24} color="#007AFF" />
-          <Text style={styles.secondaryButtonText}>和于渺聊天</Text>
+          <Ionicons name="chatbubble-outline" size={24} color="#2C2C2E" />
+          <Text style={styles.secondaryButtonText}>心语对话</Text>
         </TouchableOpacity>
       </View>
 
@@ -388,14 +547,14 @@ export default function HomeScreen() {
             textAlignVertical="top"
           />
           <TouchableOpacity 
-            style={[styles.voiceButton, isRecording && styles.voiceButtonActive]} 
-            onPress={handleVoiceRecord}
-          >
-            <Ionicons 
-              name={isRecording ? "stop" : "mic"} 
-              size={20} 
-              color={isRecording ? "white" : "#007AFF"} 
-            />
+              style={[styles.voiceButton, isRecording && styles.voiceButtonActive]} 
+              onPress={handleVoiceRecord}
+            >
+              <Ionicons 
+                name={isRecording ? "stop" : "mic"} 
+                size={20} 
+                color={isRecording ? "white" : "#34C759"} 
+              />
           </TouchableOpacity>
         </View>
       </View>
@@ -424,9 +583,9 @@ export default function HomeScreen() {
       >
         <View style={styles.chatContainer}>
           <View style={styles.chatHeader}>
-            <Text style={styles.chatTitle}>与于渺聊天</Text>
+            <Text style={styles.chatTitle}>心语对话</Text>
             <TouchableOpacity onPress={() => setChatModalVisible(false)}>
-              <Ionicons name="close" size={24} color="#007AFF" />
+              <Ionicons name="close" size={24} color="#34C759" />
             </TouchableOpacity>
           </View>
           
@@ -436,12 +595,20 @@ export default function HomeScreen() {
                 styles.messageContainer,
                 message.role === 'user' ? styles.userMessage : styles.aiMessage
               ]}>
-                <Text style={[
-                  styles.messageText,
-                  message.role === 'user' ? styles.userMessageText : styles.aiMessageText
-                ]}>
-                  {message.content}
-                </Text>
+                <View style={styles.messageHeader}>
+                  <Text style={[
+                    styles.messageText,
+                    message.role === 'user' ? styles.userMessageText : styles.aiMessageText
+                  ]}>
+                    {message.content}
+                  </Text>
+                  <TouchableOpacity 
+                    style={styles.deleteMessageButton}
+                    onPress={() => deleteChatMessage(index)}
+                  >
+                    <Ionicons name="trash-outline" size={16} color="#999999" />
+                  </TouchableOpacity>
+                </View>
                 <Text style={styles.messageTime}>
                   {message.timestamp.toLocaleTimeString()}
                 </Text>
@@ -476,49 +643,84 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 60,
     backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  titleIcon: {
+    marginRight: 12,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 4,
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#2C2C2E',
+    letterSpacing: 0.5,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666666',
+    fontSize: 18,
+    color: '#8E8E93',
+    textAlign: 'center',
+    fontWeight: '400',
+    opacity: 0.8,
   },
   mainButtons: {
     flexDirection: 'row',
     paddingHorizontal: 20,
+    marginTop: 20,
     marginBottom: 30,
-    gap: 12,
+    gap: 16,
   },
   primaryButton: {
     flex: 1,
-    backgroundColor: '#007AFF',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: 'white',
+    paddingVertical: 18,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E5E5E7',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   primaryButtonText: {
-    color: 'white',
+    color: '#2C2C2E',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
   },
   secondaryButton: {
     flex: 1,
-    backgroundColor: '#F0F0F0',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: 'white',
+    paddingVertical: 18,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E5E5E7',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   secondaryButtonText: {
-    color: '#007AFF',
+    color: '#2C2C2E',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
@@ -537,27 +739,46 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   textInput: {
-    backgroundColor: '#F8F8F8',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
     fontSize: 16,
     minHeight: 120,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: '#E8E8E8',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
   },
   voiceButton: {
     position: 'absolute',
-    right: 12,
-    bottom: 12,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F0F0F0',
+    right: 16,
+    bottom: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E5E5E7',
   },
   voiceButtonActive: {
     backgroundColor: '#FF3B30',
+    borderColor: '#FF3B30',
   },
   recentSection: {
     paddingHorizontal: 20,
@@ -585,10 +806,20 @@ const styles = StyleSheet.create({
   recentEntry: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#F8F8F8',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    padding: 18,
+    borderRadius: 16,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
   },
   entryContent: {
     flex: 1,
@@ -641,6 +872,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     maxWidth: '80%',
   },
+  messageHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  deleteMessageButton: {
+    padding: 4,
+    marginLeft: 8,
+    marginTop: 8,
+  },
   userMessage: {
     alignSelf: 'flex-end',
   },
@@ -651,9 +892,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     padding: 12,
     borderRadius: 12,
+    flex: 1,
   },
   userMessageText: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#34C759',
     color: 'white',
   },
   aiMessageText: {
@@ -687,7 +929,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#34C759',
     alignItems: 'center',
     justifyContent: 'center',
   },

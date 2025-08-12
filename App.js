@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import HomeScreen from './src/screens/HomeScreen';
 import DatabaseScreen from './src/screens/DatabaseScreen';
+import ChatHistoryScreen from './src/screens/ChatHistoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 
 const Tab = createBottomTabNavigator();
@@ -23,6 +24,8 @@ export default function App() {
               iconName = focused ? 'home' : 'home-outline';
             } else if (route.name === 'Database') {
               iconName = focused ? 'server' : 'server-outline';
+            } else if (route.name === 'ChatHistory') {
+              iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
             } else if (route.name === 'Settings') {
               iconName = focused ? 'settings' : 'settings-outline';
             }
@@ -58,6 +61,13 @@ export default function App() {
           component={DatabaseScreen} 
           options={{
             tabBarLabel: '数据库',
+          }}
+        />
+        <Tab.Screen 
+          name="ChatHistory" 
+          component={ChatHistoryScreen} 
+          options={{
+            tabBarLabel: '聊天记录',
           }}
         />
         <Tab.Screen 

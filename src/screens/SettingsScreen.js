@@ -9,7 +9,8 @@ import {
   Alert,
   Switch,
   ActivityIndicator,
-  Modal
+  Modal,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -80,16 +81,28 @@ export default function SettingsScreen() {
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.API_KEY, apiKey);
       DeepSeekService.setApiKey(apiKey);
-      Alert.alert('成功', 'API密钥已保存');
+      if (Platform.OS === 'web') {
+        window.alert('API密钥已保存');
+      } else {
+        Alert.alert('成功', 'API密钥已保存');
+      }
     } catch (error) {
       console.error('保存API密钥失败:', error);
-      Alert.alert('错误', '保存失败');
+      if (Platform.OS === 'web') {
+        window.alert('保存失败');
+      } else {
+        Alert.alert('错误', '保存失败');
+      }
     }
   };
 
   const testApiConnection = async () => {
     if (!apiKey.trim()) {
-      Alert.alert('提示', '请先输入API密钥');
+      if (Platform.OS === 'web') {
+        window.alert('请先输入API密钥');
+      } else {
+        Alert.alert('提示', '请先输入API密钥');
+      }
       return;
     }
 
@@ -97,13 +110,25 @@ export default function SettingsScreen() {
     try {
       const result = await DeepSeekService.testConnection();
       if (result.success) {
-        Alert.alert('测试成功', 'API连接正常');
+        if (Platform.OS === 'web') {
+          window.alert('API连接正常');
+        } else {
+          Alert.alert('测试成功', 'API连接正常');
+        }
       } else {
-        Alert.alert('测试失败', result.message);
+        if (Platform.OS === 'web') {
+          window.alert(result.message);
+        } else {
+          Alert.alert('测试失败', result.message);
+        }
       }
     } catch (error) {
       console.error('API测试失败:', error);
-      Alert.alert('测试失败', error.message);
+      if (Platform.OS === 'web') {
+        window.alert(error.message);
+      } else {
+        Alert.alert('测试失败', error.message);
+      }
     } finally {
       setIsTestingApi(false);
     }
@@ -122,14 +147,26 @@ export default function SettingsScreen() {
     try {
       const days = parseInt(dataRetentionDays);
       if (isNaN(days) || days < 1) {
-        Alert.alert('错误', '请输入有效的天数（大于0）');
+        if (Platform.OS === 'web') {
+          window.alert('请输入有效的天数（大于0）');
+        } else {
+          Alert.alert('错误', '请输入有效的天数（大于0）');
+        }
         return;
       }
       await AsyncStorage.setItem(STORAGE_KEYS.DATA_RETENTION_DAYS, dataRetentionDays);
-      Alert.alert('成功', '数据保留设置已保存');
+      if (Platform.OS === 'web') {
+        window.alert('数据保留设置已保存');
+      } else {
+        Alert.alert('成功', '数据保留设置已保存');
+      }
     } catch (error) {
       console.error('保存数据保留设置失败:', error);
-      Alert.alert('错误', '保存失败');
+      if (Platform.OS === 'web') {
+        window.alert('保存失败');
+      } else {
+        Alert.alert('错误', '保存失败');
+      }
     }
   };
 
@@ -167,57 +204,91 @@ export default function SettingsScreen() {
   };
 
   const deleteExportedFile = async (filePath, fileName) => {
-    Alert.alert(
-      '确认删除',
-      `确定要删除文件 "${fileName}" 吗？`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '删除',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await ExportService.deleteExportedFile(filePath);
-              await loadExportedFiles();
-              Alert.alert('成功', '文件已删除');
-            } catch (error) {
-              console.error('删除文件失败:', error);
-              Alert.alert('错误', '删除失败');
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(`确定要删除文件 "${fileName}" 吗？`);
+      if (confirmed) {
+        try {
+          await ExportService.deleteExportedFile(filePath);
+          await loadExportedFiles();
+          window.alert('文件已删除');
+        } catch (error) {
+          console.error('删除文件失败:', error);
+          window.alert('删除失败');
+        }
+      }
+    } else {
+      Alert.alert(
+        '确认删除',
+        `确定要删除文件 "${fileName}" 吗？`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '删除',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await ExportService.deleteExportedFile(filePath);
+                await loadExportedFiles();
+                Alert.alert('成功', '文件已删除');
+              } catch (error) {
+                console.error('删除文件失败:', error);
+                Alert.alert('错误', '删除失败');
+              }
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const clearAllData = async () => {
-    Alert.alert(
-      '危险操作',
-      '确定要清空所有数据吗？此操作不可恢复！',
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '确定清空',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // 这里需要实现清空所有表的功能
-              const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'chat_history'];
-              for (const table of tables) {
-                const data = await DatabaseService.getTableData(table);
-                for (const item of data) {
-                  await DatabaseService.deleteRecord(table, item.id);
-                }
-              }
-              Alert.alert('成功', '所有数据已清空');
-            } catch (error) {
-              console.error('清空数据失败:', error);
-              Alert.alert('错误', '清空失败');
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('确定要清空所有数据吗？此操作不可恢复！');
+      if (confirmed) {
+        try {
+          // 这里需要实现清空所有表的功能
+          const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'chat_history'];
+          for (const table of tables) {
+            const data = await DatabaseService.getTableData(table);
+            for (const item of data) {
+              await DatabaseService.deleteRecord(table, item.id);
             }
           }
+          window.alert('所有数据已清空');
+        } catch (error) {
+          console.error('清空数据失败:', error);
+          window.alert('清空失败');
         }
-      ]
-    );
+      }
+    } else {
+      Alert.alert(
+        '危险操作',
+        '确定要清空所有数据吗？此操作不可恢复！',
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '确定清空',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                // 这里需要实现清空所有表的功能
+                const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'chat_history'];
+                for (const table of tables) {
+                  const data = await DatabaseService.getTableData(table);
+                  for (const item of data) {
+                    await DatabaseService.deleteRecord(table, item.id);
+                  }
+                }
+                Alert.alert('成功', '所有数据已清空');
+              } catch (error) {
+                console.error('清空数据失败:', error);
+                Alert.alert('错误', '清空失败');
+              }
+            }
+          }
+        ]
+      );
+    }
   };
 
   const formatFileSize = (bytes) => {
@@ -359,6 +430,33 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* 关于应用 */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>关于应用</Text>
+        
+        <View style={styles.aboutContainer}>
+          <View style={styles.aboutItem}>
+            <Text style={styles.aboutLabel}>版本</Text>
+            <Text style={styles.aboutValue}>1.0 Beta</Text>
+          </View>
+          
+          <View style={styles.aboutItem}>
+            <Text style={styles.aboutLabel}>制作人</Text>
+            <Text style={styles.aboutValue}>于渺</Text>
+          </View>
+          
+          <View style={styles.aboutItem}>
+             <Text style={styles.aboutLabel}>发布时间</Text>
+             <Text style={styles.aboutValue}>2025.08.12</Text>
+           </View>
+          
+          <View style={styles.aboutItem}>
+            <Text style={styles.aboutLabel}>应用简介</Text>
+            <Text style={styles.aboutDescription}>心灵驿站 - 一个专注于个人成长与内心记录的智能日记应用，让每一个想法都有归宿，让每一份情感都被珍藏。</Text>
+          </View>
+        </View>
+      </View>
+
       {/* 导出文件模态框 */}
       <Modal
         visible={filesModalVisible}
@@ -386,9 +484,9 @@ export default function SettingsScreen() {
                   <View style={styles.fileActions}>
                     <TouchableOpacity 
                       style={styles.shareFileButton}
-                      onPress={() => ExportService.shareFile(file.path)}
+                      onPress={() => ExportService.saveToPhoneStorage(file.path, file.name)}
                     >
-                      <Ionicons name="share-outline" size={16} color="#007AFF" />
+                      <Ionicons name="download-outline" size={16} color="#007AFF" />
                     </TouchableOpacity>
                     <TouchableOpacity 
                       style={styles.deleteFileButton}
@@ -606,5 +704,29 @@ const styles = StyleSheet.create({
     color: '#999999',
     fontSize: 16,
     marginTop: 40,
+  },
+  aboutContainer: {
+    backgroundColor: '#F8F8F8',
+    borderRadius: 12,
+    padding: 16,
+  },
+  aboutItem: {
+    marginBottom: 12,
+  },
+  aboutLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666666',
+    marginBottom: 4,
+  },
+  aboutValue: {
+    fontSize: 16,
+    color: '#000000',
+    fontWeight: '500',
+  },
+  aboutDescription: {
+    fontSize: 14,
+    color: '#666666',
+    lineHeight: 20,
   },
 });

@@ -1,5 +1,6 @@
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
+import { Platform } from 'react-native';
 
 class VoiceService {
   constructor() {
@@ -115,11 +116,33 @@ class VoiceService {
         await Speech.stop();
       }
 
+      console.log('🔊 开始语音播放:', {
+        text: text.substring(0, 50) + (text.length > 50 ? '...' : ''),
+        options: defaultOptions
+      });
+
       await Speech.speak(text, defaultOptions);
       return true;
     } catch (error) {
       console.error('文本转语音失败:', error);
       return false;
+    }
+  }
+
+  // 使用最佳女性声音播放文本
+  async speakWithFemaleVoice(text) {
+    try {
+      const femaleVoiceConfig = await this.getBestFemaleVoice();
+      console.log('🎀 使用女性声音配置播放:', femaleVoiceConfig);
+      return await this.speakText(text, femaleVoiceConfig);
+    } catch (error) {
+      console.error('女性声音播放失败:', error);
+      // 降级到默认配置
+      return await this.speakText(text, {
+        language: 'zh-CN',
+        pitch: 1.2,
+        rate: 0.85
+      });
     }
   }
 
@@ -160,31 +183,278 @@ class VoiceService {
     }
   }
 
-  // 模拟语音识别（实际项目中可以集成真实的语音识别服务）
+  // 获取最佳的年轻女性声音配置
+  async getBestFemaleVoice() {
+    try {
+      const voices = await this.getAvailableVoices();
+      console.log('🎤 可用的中文语音:', voices.map(v => `${v.name} (${v.language})`));
+      
+      // 优先选择女性声音，按优先级排序
+      const femaleVoiceKeywords = [
+        'female', 'woman', 'girl', '女', '小', 'xiaoxiao', 'xiaoyan', 'xiaoli',
+        'tingting', 'yaoyao', 'xiaoqian', 'xiaorui', 'xiaomeng'
+      ];
+      
+      // 查找最佳女性声音
+      let bestVoice = null;
+      for (const keyword of femaleVoiceKeywords) {
+        const foundVoice = voices.find(voice => 
+          voice.name.toLowerCase().includes(keyword.toLowerCase()) ||
+          voice.identifier.toLowerCase().includes(keyword.toLowerCase())
+        );
+        if (foundVoice) {
+          bestVoice = foundVoice;
+          break;
+        }
+      }
+      
+      if (bestVoice) {
+        console.log('🎯 选择的女性声音:', bestVoice.name, bestVoice.identifier);
+        return {
+          voice: bestVoice.identifier,
+          language: bestVoice.language,
+          pitch: 1.15, // 稍高音调，更年轻
+          rate: 0.85,  // 适中语速，清晰易懂
+        };
+      } else {
+        console.log('⚠️ 未找到专门的女性声音，使用默认配置');
+        return {
+          voice: null,
+          language: 'zh-CN',
+          pitch: 1.2,  // 更高音调补偿
+          rate: 0.8,   // 稍慢语速
+        };
+      }
+    } catch (error) {
+      console.error('获取女性声音配置失败:', error);
+      return {
+        voice: null,
+        language: 'zh-CN',
+        pitch: 1.2,
+        rate: 0.85,
+      };
+    }
+  }
+
+  // 语音识别功能
   async speechToText(audioUri) {
     try {
-      // 这里应该调用真实的语音识别API
-      // 由于Expo没有内置的语音识别，这里返回一个提示
-      console.log('语音文件路径:', audioUri);
+      console.log('开始语音识别，音频文件:', audioUri);
       
-      // 在实际应用中，你可以：
-      // 1. 将音频文件上传到云端语音识别服务（如百度、腾讯、阿里云等）
-      // 2. 使用第三方语音识别库
-      // 3. 集成原生语音识别功能
+      // 在Web环境下使用Web Speech API
+      if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
+        return await this.webSpeechRecognition();
+      }
       
+      // 在移动端环境下，由于Expo没有内置语音识别，返回提示
       return {
         success: false,
         text: '',
-        message: '语音识别功能需要集成第三方服务，当前版本请手动输入文字'
+        message: '移动端语音识别功能需要集成第三方服务，Web端支持语音识别'
       };
     } catch (error) {
       console.error('语音识别失败:', error);
       return {
         success: false,
         text: '',
-        message: '语音识别失败'
+        message: '语音识别失败: ' + error.message
       };
     }
+  }
+
+  // 检查网络连接状态
+  async checkNetworkConnection() {
+    try {
+      // 首先检查浏览器的在线状态
+      if (!navigator.onLine) {
+        console.log('浏览器显示离线状态');
+        return false;
+      }
+      
+      // 尝试访问一个简单的网络资源进行验证
+      // 使用当前域名的根路径，避免跨域问题
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(window.location.origin + '/favicon.ico', {
+        method: 'HEAD',
+        cache: 'no-cache',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      return true;
+    } catch (error) {
+      console.log('网络连接检查失败:', error);
+      // 如果fetch失败，但navigator.onLine为true，可能是网络延迟
+      // 在这种情况下，我们仍然允许尝试语音识别
+      return navigator.onLine;
+    }
+  }
+
+  // Web Speech API 语音识别
+  async webSpeechRecognition() {
+    return new Promise(async (resolve) => {
+      try {
+        // 检查浏览器支持
+        if (!window.webkitSpeechRecognition && !window.SpeechRecognition) {
+          resolve({
+            success: false,
+            text: '',
+            message: '当前浏览器不支持语音识别功能，请使用Chrome、Edge或Safari浏览器'
+          });
+          return;
+        }
+
+        // 检查是否为HTTPS环境（语音识别需要安全上下文）
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+          resolve({
+            success: false,
+            text: '',
+            message: '语音识别需要HTTPS环境或本地环境，请使用安全连接'
+          });
+          return;
+        }
+
+        // 简化网络检查，只检查基本在线状态
+        if (!navigator.onLine) {
+          resolve({
+            success: false,
+            text: '',
+            message: '设备显示离线状态，语音识别需要网络连接。请检查网络设置后重试'
+          });
+          return;
+        }
+        
+        const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
+        const recognition = new SpeechRecognition();
+        
+        recognition.lang = 'zh-CN';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+        
+        let hasResult = false;
+        
+        recognition.onstart = () => {
+          console.log('🎤 语音识别已启动，请开始说话...');
+        };
+        
+        recognition.onresult = (event) => {
+          if (event.results.length > 0) {
+            const transcript = event.results[0][0].transcript;
+            console.log('🎯 语音识别结果:', transcript);
+            hasResult = true;
+            resolve({
+              success: true,
+              text: transcript,
+              message: '语音识别成功'
+            });
+          }
+        };
+        
+        recognition.onerror = (event) => {
+          console.error('❌ 语音识别错误:', event.error);
+          if (!hasResult) {
+            let errorMessage = '语音识别失败';
+            switch (event.error) {
+              case 'network':
+                errorMessage = '语音识别服务连接失败。Web Speech API依赖Google服务，在国内可能无法正常使用。建议：\n1. 检查网络连接\n2. 尝试使用VPN\n3. 或直接手动输入文字';
+                break;
+              case 'not-allowed':
+                errorMessage = '麦克风权限被拒绝，请在浏览器设置中允许使用麦克风';
+                break;
+              case 'no-speech':
+                errorMessage = '未检测到语音，请确保麦克风正常工作并重新尝试';
+                break;
+              case 'audio-capture':
+                errorMessage = '麦克风无法访问，请检查设备连接';
+                break;
+              case 'service-not-allowed':
+                errorMessage = '语音识别服务不可用，请稍后重试';
+                break;
+              case 'aborted':
+                errorMessage = '语音识别被中断';
+                break;
+              case 'language-not-supported':
+                errorMessage = '不支持中文语音识别';
+                break;
+              default:
+                errorMessage = '语音识别失败: ' + event.error;
+            }
+            resolve({
+              success: false,
+              text: '',
+              message: errorMessage
+            });
+          }
+        };
+        
+        recognition.onend = () => {
+          console.log('🔚 语音识别结束');
+          if (!hasResult) {
+            resolve({
+              success: false,
+              text: '',
+              message: '未识别到语音内容'
+            });
+          }
+        };
+        
+        recognition.start();
+        console.log('开始Web语音识别...');
+        
+        // 设置超时
+        setTimeout(() => {
+          if (!hasResult) {
+            recognition.stop();
+            resolve({
+              success: false,
+              text: '',
+              message: '语音识别超时'
+            });
+          }
+        }, 15000); // 增加到15秒超时
+        
+      } catch (error) {
+        console.error('Web语音识别初始化失败:', error);
+        resolve({
+          success: false,
+          text: '',
+          message: '浏览器不支持语音识别功能'
+        });
+      }
+    });
+  }
+
+  // 直接语音识别（不需要先录音）
+  async startDirectSpeechRecognition() {
+    return new Promise((resolve) => {
+      // 检查浏览器是否支持语音识别
+      if (typeof window === 'undefined' || !('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+        resolve({
+          success: false,
+          message: '当前环境不支持语音识别功能。在移动端，请尝试使用手机浏览器的语音输入功能。'
+        });
+        return;
+      }
+
+      // 检查网络连接
+      if (!navigator.onLine) {
+        resolve({
+          success: false,
+          message: '设备显示离线状态，语音识别需要网络连接。请检查网络设置后重试'
+        });
+        return;
+      }
+
+      this.webSpeechRecognition().then(resolve).catch((error) => {
+        resolve({
+          success: false,
+          message: error.message || '语音识别失败'
+        });
+      });
+    });
   }
 
   // 清理资源

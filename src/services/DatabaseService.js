@@ -158,22 +158,49 @@ class DatabaseService {
 
   // Web环境的localStorage操作
   getWebData(tableName) {
-    if (!this.isWeb) return [];
     try {
-      const data = localStorage.getItem(`aijournal_${tableName}`);
-      return data ? JSON.parse(data) : [];
+      if (this.isWeb) {
+        const data = localStorage.getItem(`aijournal_${tableName}`);
+        return data ? JSON.parse(data) : [];
+      } else {
+        // React Native环境使用AsyncStorage的同步替代方案
+        // 注意：这里应该使用AsyncStorage，但为了兼容性暂时使用全局变量
+        if (!global.aijournal_storage) {
+          global.aijournal_storage = {};
+        }
+        return global.aijournal_storage[tableName] || [];
+      }
     } catch (error) {
-      console.error('获取Web数据失败:', error);
+      console.error('获取数据失败:', error);
       return [];
     }
   }
 
   setWebData(tableName, data) {
-    if (!this.isWeb) return;
     try {
-      localStorage.setItem(`aijournal_${tableName}`, JSON.stringify(data));
+      if (this.isWeb) {
+        localStorage.setItem(`aijournal_${tableName}`, JSON.stringify(data));
+        // 触发自定义事件通知界面刷新
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('localStorageUpdate', { 
+            detail: { tableName, dataLength: data.length } 
+          }));
+        }
+      } else {
+        // React Native环境使用AsyncStorage的同步替代方案
+        if (!global.aijournal_storage) {
+          global.aijournal_storage = {};
+        }
+        global.aijournal_storage[tableName] = data; // 修复：直接存储数据，不需要JSON.stringify
+        // 触发自定义事件通知界面刷新
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('localStorageUpdate', { 
+            detail: { tableName, dataLength: data.length } 
+          }));
+        }
+      }
     } catch (error) {
-      console.error('保存Web数据失败:', error);
+      console.error('保存数据失败:', error);
     }
   }
 
@@ -185,7 +212,7 @@ class DatabaseService {
   async cleanupDuplicateData() {
     console.log('🧹 开始清理重复数据...');
     
-    const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts'];
+    const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'food_records', 'chat_history'];
     
     for (const tableName of tables) {
       try {
@@ -214,6 +241,10 @@ class DatabaseService {
                 contentKey = `mood_${parsed.mood_type}_${parsed.date || new Date(item.created_at).toDateString()}`;
               } else if (tableName === 'thoughts' && parsed.content) {
                 contentKey = `content_${parsed.content.substring(0, 50)}`;
+              } else if (tableName === 'food_records') {
+                contentKey = `food_${parsed.food_name}_${parsed.date || new Date(item.created_at).toDateString()}`;
+              } else if (tableName === 'chat_history') {
+                contentKey = `chat_${parsed.user_message ? parsed.user_message.substring(0, 30) : item.user_message ? item.user_message.substring(0, 30) : ''}_${item.session_id || 'default'}`;
               } else {
                 contentKey = JSON.stringify(parsed);
               }
@@ -472,6 +503,12 @@ class DatabaseService {
         if (data.mood) fields.mood = data.mood;
         fields.updated_at = new Date().toISOString();
         break;
+        
+      case 'chat_history':
+        if (data.user_message) fields.user_message = data.user_message;
+        if (data.ai_response) fields.ai_response = data.ai_response;
+        if (data.session_id) fields.session_id = data.session_id;
+        break;
     }
     
     return fields;
@@ -484,10 +521,15 @@ class DatabaseService {
         return this.getWebData(tableName);
       }
 
+      if (!this.db) {
+        console.warn('数据库未初始化，返回空数组');
+        return [];
+      }
+
       const result = await this.db.getAllAsync(
         `SELECT * FROM ${tableName} ORDER BY created_at DESC`
       );
-      return result;
+      return result || [];
     } catch (error) {
       console.error(`查询${tableName}数据失败:`, error);
       return [];
@@ -518,19 +560,31 @@ class DatabaseService {
     try {
       if (this.isWeb) {
         const data = this.getWebData(tableName);
-        const filteredData = data.filter(item => item.id !== id);
+        console.log(`[DEBUG] 删除前数据量: ${data.length}`);
+        console.log(`[DEBUG] 要删除的ID: ${id} (类型: ${typeof id})`);
+        console.log(`[DEBUG] 数据中的ID列表:`, data.map(item => `${item.id} (${typeof item.id})`));
+        
+        const filteredData = data.filter(item => {
+          const itemIdStr = String(item.id);
+          const targetIdStr = String(id);
+          const shouldKeep = itemIdStr !== targetIdStr;
+          console.log(`[DEBUG] 比较: ${itemIdStr} !== ${targetIdStr} = ${shouldKeep}`);
+          return shouldKeep;
+        });
+        
+        console.log(`[DEBUG] 删除后数据量: ${filteredData.length}`);
         this.setWebData(tableName, filteredData);
-        return true;
+        return { success: true, deletedCount: data.length - filteredData.length };
       }
 
-      await this.db.runAsync(
+      const result = await this.db.runAsync(
         `DELETE FROM ${tableName} WHERE id = ?`,
         [id]
       );
-      return true;
+      return { success: true, deletedCount: result.changes };
     } catch (error) {
       console.error(`删除${tableName}数据失败:`, error);
-      return false;
+      return { success: false, error: error.message };
     }
   }
 
@@ -566,7 +620,15 @@ class DatabaseService {
 
   // 删除记录 (兼容性方法)
   async deleteRecord(tableName, id) {
-    return await this.deleteData(tableName, id);
+    try {
+      console.log(`[DEBUG] 删除记录开始: 表=${tableName}, ID=${id}, ID类型=${typeof id}`);
+      const result = await this.deleteData(tableName, id);
+      console.log(`[DEBUG] 删除结果:`, result);
+      return result;
+    } catch (error) {
+      console.error('[ERROR] 删除记录失败:', error);
+      throw error;
+    }
   }
 
   // 移动数据到另一个表
@@ -652,28 +714,33 @@ class DatabaseService {
   }
 
   // 插入聊天记录
-  async insertChatHistory(userMessage, aiResponse) {
+  async insertChatHistory(userMessage, aiResponse, sessionId = null) {
     try {
+      console.log('💬 开始保存聊天记录:', { userMessage: userMessage.substring(0, 50), aiResponse: aiResponse.substring(0, 50), sessionId });
+      
       if (this.isWeb) {
         const data = this.getWebData('chat_history');
         const newRecord = {
           id: this.generateId(),
           user_message: userMessage,
           ai_response: aiResponse,
+          session_id: sessionId || Date.now().toString(),
           created_at: new Date().toISOString()
         };
         data.push(newRecord);
         this.setWebData('chat_history', data);
+        console.log('✅ Web环境聊天记录保存成功, 当前总数:', data.length);
         return newRecord.id;
       }
 
       const result = await this.db.runAsync(
-        'INSERT INTO chat_history (user_message, ai_response) VALUES (?, ?)',
-        [userMessage, aiResponse]
+        'INSERT INTO chat_history (user_message, ai_response, session_id) VALUES (?, ?, ?)',
+        [userMessage, aiResponse, sessionId || Date.now().toString()]
       );
+      console.log('✅ SQLite聊天记录保存成功, ID:', result.lastInsertRowId);
       return result.lastInsertRowId;
     } catch (error) {
-      console.error('插入聊天记录失败:', error);
+      console.error('❌ 插入聊天记录失败:', error);
       throw error;
     }
   }
@@ -842,9 +909,27 @@ class DatabaseService {
     return await this.getAllData(tableName);
   }
 
+  // 获取所有表的完整数据
+  async getAllTablesData() {
+    const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'food_records', 'chat_history'];
+    const result = {};
+    
+    for (const tableName of tables) {
+      try {
+        const data = await this.getAllData(tableName);
+        result[tableName] = data || [];
+      } catch (error) {
+        console.error(`获取${tableName}数据失败:`, error);
+        result[tableName] = [];
+      }
+    }
+    
+    return result;
+  }
+
   // 获取所有表的最近数据
   async getRecentData(days = 7) {
-    const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'food_records'];
+    const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'food_records', 'chat_history'];
     const result = {};
     
     for (const tableName of tables) {

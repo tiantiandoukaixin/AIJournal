@@ -256,19 +256,23 @@ ${content}`;
     const parseUserData = (data) => {
       if (!data) return null;
       
+      console.log('🔍 原始用户数据:', data);
+      
       const parsedData = {
         personal_info: {},
         preferences: [],
         milestones: [],
         moods: [],
         thoughts: [],
-        food_records: []
+        food_records: [],
+        chat_history: []
       };
       
       // 遍历所有数据条目
       Object.keys(data).forEach(key => {
+        console.log(`📋 处理数据表: ${key}, 数据条数: ${Array.isArray(data[key]) ? data[key].length : '非数组'}`);
         if (Array.isArray(data[key])) {
-          data[key].forEach(item => {
+          data[key].forEach((item, index) => {
             try {
               // 解析存储在content字段中的JSON数据
               let itemData = item;
@@ -278,8 +282,13 @@ ${content}`;
                 itemData = item.content;
               }
               
+              if (key === 'personal_info') {
+                console.log(`👤 个人信息项 ${index}:`, itemData);
+              }
+              
               // 根据数据库表名直接分类存储
-              if (key === 'personal_info' && itemData.name) {
+              if (key === 'personal_info') {
+                // 移除name条件限制，允许所有个人信息数据
                 parsedData.personal_info = { ...parsedData.personal_info, ...itemData };
               } else if (key === 'preferences') {
                 parsedData.preferences.push(itemData);
@@ -291,6 +300,8 @@ ${content}`;
                 parsedData.thoughts.push(itemData);
               } else if (key === 'food_records') {
                 parsedData.food_records.push(itemData);
+              } else if (key === 'chat_history') {
+                parsedData.chat_history.push(itemData);
               }
             } catch (error) {
               console.log('解析数据项失败:', error, item);
@@ -299,6 +310,7 @@ ${content}`;
         }
       });
       
+      console.log('✅ 最终解析的个人信息:', parsedData.personal_info);
       return parsedData;
     };
     
@@ -310,10 +322,20 @@ ${content}`;
     
     // 添加个人信息到上下文
     if (parsedUserData && parsedUserData.personal_info && Object.keys(parsedUserData.personal_info).length > 0) {
+      const info = parsedUserData.personal_info;
+      const summaryParts = [];
+      
+      if (info.name) summaryParts.push(`姓名${info.name}`);
+      if (info.age) summaryParts.push(`年龄${info.age}岁`);
+      if (info.height) summaryParts.push(`身高${info.height}cm`);
+      if (info.weight) summaryParts.push(`体重${info.weight}kg`);
+      if (info.occupation) summaryParts.push(`职业${info.occupation}`);
+      if (info.gender) summaryParts.push(`性别${info.gender}`);
+      
       contextMemory.push({
         type: 'personal_info',
         data: parsedUserData.personal_info,
-        summary: `用户基本信息：${parsedUserData.personal_info.name ? `姓名${parsedUserData.personal_info.name}` : ''}${parsedUserData.personal_info.age ? `，年龄${parsedUserData.personal_info.age}岁` : ''}${parsedUserData.personal_info.occupation ? `，职业${parsedUserData.personal_info.occupation}` : ''}`
+        summary: `用户基本信息：${summaryParts.join('，')}`
       });
     }
     
