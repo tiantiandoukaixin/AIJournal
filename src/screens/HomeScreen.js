@@ -82,41 +82,50 @@ export default function HomeScreen() {
     console.log('🔧 清理按钮被点击');
     
     if (Platform.OS === 'web') {
-      const confirmed = window.confirm('这将清理数据库中的重复记录，保留最新的数据。是否继续？');
+      const confirmed = window.confirm('这将清空所有记录数据，此操作不可恢复！是否继续？');
       if (confirmed) {
         try {
-          console.log('🚀 开始执行数据清理');
+          console.log('🚀 开始执行数据清空');
           setIsLoading(true);
-          await DatabaseService.cleanupDuplicateData();
-          await loadRecentData();
-          console.log('✅ 数据清理完成');
-          window.alert('数据清理完成！');
+          const success = await DatabaseService.clearAllData();
+          if (success) {
+            await loadRecentData();
+            console.log('✅ 数据清空完成');
+            window.alert('所有记录已清空！');
+          } else {
+            window.alert('数据清空失败，请稍后重试');
+          }
         } catch (error) {
-          console.error('❌ 数据清理失败:', error);
-          window.alert('数据清理失败，请稍后重试');
+          console.error('❌ 数据清空失败:', error);
+          window.alert('数据清空失败，请稍后重试');
         } finally {
           setIsLoading(false);
         }
       }
     } else {
       Alert.alert(
-        '清理重复数据',
-        '这将清理数据库中的重复记录，保留最新的数据。是否继续？',
+        '清空所有记录',
+        '这将清空所有记录数据，此操作不可恢复！是否继续？',
         [
           { text: '取消', style: 'cancel' },
           {
-            text: '确定',
+            text: '确定清空',
+            style: 'destructive',
             onPress: async () => {
               try {
-                console.log('🚀 开始执行数据清理');
+                console.log('🚀 开始执行数据清空');
                 setIsLoading(true);
-                await DatabaseService.cleanupDuplicateData();
-                await loadRecentData();
-                console.log('✅ 数据清理完成');
-                Alert.alert('成功', '数据清理完成！');
+                const success = await DatabaseService.clearAllData();
+                if (success) {
+                  await loadRecentData();
+                  console.log('✅ 数据清空完成');
+                  Alert.alert('成功', '所有记录已清空！');
+                } else {
+                  Alert.alert('错误', '数据清空失败，请稍后重试');
+                }
               } catch (error) {
-                console.error('❌ 数据清理失败:', error);
-                Alert.alert('错误', '数据清理失败，请稍后重试');
+                console.error('❌ 数据清空失败:', error);
+                Alert.alert('错误', '数据清空失败，请稍后重试');
               } finally {
                 setIsLoading(false);
               }
@@ -226,118 +235,8 @@ export default function HomeScreen() {
     }
   };
 
-  const handleVoiceRecord = async () => {
-    if (isRecording) {
-      // 停止录音
-      const audioUri = await VoiceService.stopRecording();
-      setIsRecording(false);
-      
-      if (audioUri) {
-        // 开始语音识别
-        setIsLoading(true);
-        try {
-          const result = await VoiceService.speechToText(audioUri);
-          
-          if (result.success && result.text) {
-             // 将识别结果添加到现有文本中
-             const newText = journalText ? journalText + ' ' + result.text : result.text;
-             setJournalText(newText);
-             Alert.alert('语音识别成功', `识别结果：${result.text}`);
-           } else {
-             // 针对网络错误提供重试和手动输入选项
-             if (result.message && (result.message.includes('网络连接失败') || result.message.includes('网络') || result.message.includes('Google服务'))) {
-               Alert.alert(
-                 '语音识别失败',
-                 result.message,
-                 [
-                   { text: '手动输入', onPress: () => {
-                     // 在移动端，可以通过ref聚焦到文本输入框
-                     // 这里暂时只提示用户手动输入
-                     Alert.alert('提示', '请在下方文本框中手动输入您的内容');
-                   }},
-                   { text: '重试', onPress: () => handleVoiceRecord() }
-                 ]
-               );
-             } else {
-               Alert.alert('语音识别失败', result.message || '未能识别语音内容');
-             }
-           }
-        } catch (error) {
-          console.error('语音识别过程出错:', error);
-          Alert.alert('错误', '语音识别过程中出现错误');
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    } else {
-      // 在Web环境下，直接使用语音识别而不需要录音
-      if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
-        setIsRecording(true);
-        try {
-          const result = await VoiceService.startDirectSpeechRecognition();
-          
-          if (result.success && result.text) {
-             // 将识别结果添加到现有文本中
-             const newText = journalText ? journalText + ' ' + result.text : result.text;
-             setJournalText(newText);
-             Alert.alert('语音识别成功', `识别结果：${result.text}`);
-           } else {
-             // 针对网络错误提供重试和手动输入选项
-             if (result.message && (result.message.includes('网络连接') || result.message.includes('网络') || result.message.includes('Google服务'))) {
-               Alert.alert(
-                 '语音识别失败',
-                 result.message,
-                 [
-                   { text: '手动输入', onPress: () => {
-                     // 聚焦到文本输入框
-                     const textInput = document.querySelector('textarea, input[type="text"]');
-                     if (textInput) {
-                       textInput.focus();
-                     }
-                   }},
-                   { text: '重试', onPress: () => setTimeout(() => handleVoiceRecord(), 1000) }
-                 ]
-               );
-             } else {
-               Alert.alert('语音识别失败', result.message || '未能识别语音内容');
-             }
-           }
-        } catch (error) {
-          console.error('语音识别过程出错:', error);
-          const errorMsg = error.message || '语音识别失败';
-          
-          // 检查是否为网络错误，提供重试和手动输入选项
-          if (errorMsg.includes('网络连接') || errorMsg.includes('网络') || errorMsg.includes('Google服务')) {
-            Alert.alert(
-              '语音识别失败',
-              '语音识别服务连接失败。Web Speech API依赖Google服务，在国内可能无法正常使用。',
-              [
-                { text: '手动输入', onPress: () => {
-                  // 聚焦到文本输入框
-                  const textInput = document.querySelector('textarea, input[type="text"]');
-                  if (textInput) {
-                    textInput.focus();
-                  }
-                }},
-                { text: '重试', onPress: () => setTimeout(() => handleVoiceRecord(), 1000) }
-              ]
-            );
-          } else {
-            Alert.alert('错误', '语音识别过程中出现错误');
-          }
-        } finally {
-          setIsRecording(false);
-        }
-      } else {
-        // 移动端开始录音
-        const success = await VoiceService.startRecording();
-        if (success) {
-          setIsRecording(true);
-        } else {
-          Alert.alert('错误', '无法开始录音，请检查麦克风权限');
-        }
-      }
-    }
+  const handleVoiceRecord = () => {
+    Alert.alert('提示', '语音识别功能待后续开发，敬请期待！');
   };
 
   const handleChatWithYuMiao = async () => {

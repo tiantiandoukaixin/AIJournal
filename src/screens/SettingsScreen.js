@@ -311,8 +311,11 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>设置</Text>
-        <Text style={styles.subtitle}>配置应用参数</Text>
+        <View style={styles.titleContainer}>
+          <Ionicons name="settings" size={28} color="#8B5CF6" style={styles.titleIcon} />
+          <Text style={styles.title}>设置</Text>
+        </View>
+        <Text style={styles.subtitle}>调谐心灵的频率，定制专属的数字空间</Text>
       </View>
 
       {/* API设置 */}
@@ -528,15 +531,27 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     backgroundColor: '#FFFFFF',
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 4,
   },
+  titleIcon: {
+    marginRight: 12,
+  },
+  title: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#2C2C2E',
+    letterSpacing: 0.5,
+  },
   subtitle: {
-    fontSize: 16,
-    color: '#666666',
+    fontSize: 18,
+    color: '#8E8E93',
+    textAlign: 'center',
+    fontWeight: '400',
+    opacity: 0.8,
   },
   section: {
     marginBottom: 30,

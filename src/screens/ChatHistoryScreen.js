@@ -510,9 +510,17 @@ export default function ChatHistoryScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>聊天记录</Text>
-        <Text style={styles.subtitle}>查看和管理对话历史</Text>
-      </View>
+          <View style={styles.titleContainer}>
+            <Ionicons 
+              name="chatbubbles" 
+              size={32} 
+              color="#5AC8FA" 
+              style={styles.titleIcon}
+            />
+            <Text style={styles.title}>聊天记录</Text>
+          </View>
+          <Text style={styles.subtitle}>心灵对话的印记，智慧交融的轨迹</Text>
+        </View>
 
       {/* 搜索和控制栏 */}
       <View style={styles.controlBar}>
@@ -624,16 +632,30 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 60,
     backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  titleIcon: {
+    marginRight: 12,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#000000',
-    marginBottom: 4,
+    fontSize: 36,
+    fontWeight: '800',
+    color: '#2C2C2E',
+    letterSpacing: 0.5,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666666',
+    fontSize: 18,
+    color: '#8E8E93',
+    textAlign: 'center',
+    fontWeight: '400',
+    opacity: 0.8,
   },
   controlBar: {
     paddingHorizontal: 20,
@@ -713,10 +735,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   chatItem: {
-    backgroundColor: '#F8F8F8',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 18,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
   },
   chatHeader: {
     flexDirection: 'row',
