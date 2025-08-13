@@ -17,6 +17,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DatabaseService from '../services/DatabaseService';
 import DeepSeekService from '../services/DeepSeekService';
 import VoiceService from '../services/VoiceService';
+import { platformStyles, colors, spacing, fontSize } from '../utils/platformStyles';
+import { webComponentStyles } from '../utils/webStyles';
 
 const { width } = Dimensions.get('window');
 
@@ -30,6 +32,7 @@ export default function HomeScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [chatModalVisible, setChatModalVisible] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [userData, setUserData] = useState(null);
   const [recentEntries, setRecentEntries] = useState([]);
@@ -244,6 +247,16 @@ export default function HomeScreen() {
       const data = await DatabaseService.getRecentData(30);
       setUserData(data);
     }
+    
+    // 生成新的会话ID或使用现有的
+    if (!currentSessionId) {
+      const sessionId = Date.now().toString();
+      setCurrentSessionId(sessionId);
+    }
+    
+    // 每次打开聊天界面都加载最近的聊天记录
+    await loadRecentChatMessages();
+    
     setChatModalVisible(true);
   };
 
@@ -265,8 +278,9 @@ export default function HomeScreen() {
       const aiMessage = { role: 'assistant', content: aiResponse, timestamp: new Date() };
       setChatMessages([...newMessages, aiMessage]);
       
-      // 保存聊天记录
-      await DatabaseService.insertChatHistory(userMessage, aiResponse, Date.now().toString());
+      // 保存完整的聊天记录（只保存一次，包含用户消息和AI回复）
+      await DatabaseService.insertChatHistory(userMessage, aiResponse, currentSessionId || Date.now().toString());
+      console.log('✅ 聊天记录已保存到数据库');
       
       // 检查语音设置并播放AI回复
       try {
@@ -288,15 +302,47 @@ export default function HomeScreen() {
       console.error('聊天失败:', error);
       const errorMessage = { role: 'assistant', content: '抱歉，我现在有点忙，稍后再聊好吗？', timestamp: new Date() };
       setChatMessages([...newMessages, errorMessage]);
+      
+      // 保存错误消息到数据库
+      try {
+        await DatabaseService.insertChatHistory(userMessage, errorMessage.content, currentSessionId || Date.now().toString());
+      } catch (dbError) {
+        console.error('保存错误消息失败:', dbError);
+      }
     }
   };
 
-  const deleteChatMessage = (index) => {
+  const deleteChatMessage = async (index) => {
+    const deleteMessage = async () => {
+      const messageToDelete = chatMessages[index];
+      const newMessages = chatMessages.filter((_, i) => i !== index);
+      setChatMessages(newMessages);
+      
+      // 从数据库中删除对应的聊天记录
+      try {
+        // 根据消息内容和时间戳查找并删除对应的数据库记录
+        const chatHistory = await DatabaseService.getTableData('chat_history');
+        const recordToDelete = chatHistory.find(record => {
+          if (messageToDelete.role === 'user') {
+            return record.user_message === messageToDelete.content;
+          } else {
+            return record.ai_response === messageToDelete.content;
+          }
+        });
+        
+        if (recordToDelete) {
+          await DatabaseService.deleteChatMessage(recordToDelete.id);
+          console.log('删除消息成功:', messageToDelete);
+        }
+      } catch (error) {
+        console.error('删除消息失败:', error);
+      }
+    };
+    
     if (Platform.OS === 'web') {
       const confirmed = window.confirm('确定要删除这条消息吗？');
       if (confirmed) {
-        const newMessages = chatMessages.filter((_, i) => i !== index);
-        setChatMessages(newMessages);
+        await deleteMessage();
       }
     } else {
       Alert.alert(
@@ -307,13 +353,57 @@ export default function HomeScreen() {
           {
             text: '删除',
             style: 'destructive',
-            onPress: () => {
-              const newMessages = chatMessages.filter((_, i) => i !== index);
-              setChatMessages(newMessages);
-            }
+            onPress: deleteMessage
           }
         ]
       );
+    }
+  };
+
+  // 加载最近的聊天记录
+  const loadRecentChatMessages = async () => {
+    try {
+      const recentChats = await DatabaseService.getTableData('chat_history');
+      const sortedChats = recentChats
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        .slice(-10); // 只加载最近10条
+      
+      const messages = [];
+      sortedChats.forEach(chat => {
+        if (chat.user_message) {
+          messages.push({
+            role: 'user',
+            content: chat.user_message,
+            timestamp: new Date(chat.created_at)
+          });
+        }
+        if (chat.ai_response) {
+          messages.push({
+            role: 'assistant',
+            content: chat.ai_response,
+            timestamp: new Date(chat.created_at)
+          });
+        }
+      });
+      
+      setChatMessages(messages);
+    } catch (error) {
+      console.error('加载聊天记录失败:', error);
+    }
+  };
+
+  // 播放指定消息的语音
+  const playMessageVoice = async (message) => {
+    try {
+      const savedVoiceEnabled = await AsyncStorage.getItem(STORAGE_KEYS.VOICE_ENABLED);
+      const voiceEnabled = savedVoiceEnabled !== null ? JSON.parse(savedVoiceEnabled) : true;
+      
+      if (voiceEnabled && message.role === 'assistant') {
+        console.log('🔊 播放指定消息的语音');
+        await VoiceService.speakWithFemaleVoice(message.content);
+      }
+    } catch (error) {
+      console.error('语音播放失败:', error);
     }
   };
 
@@ -401,7 +491,7 @@ export default function HomeScreen() {
         <Ionicons name={getEntryIcon(entry.type)} size={20} color="#34C759" />
         <View style={styles.entryContent}>
           <Text style={styles.entryTitle}>{getEntryTitle(entry, entryData)}</Text>
-          <Text style={styles.entryText} numberOfLines={2}>{getEntryContent(entry, entryData)}</Text>
+          <Text style={styles.entryText}>{getEntryContent(entry, entryData)}</Text>
           <Text style={styles.entryDate}>{new Date(entry.created_at).toLocaleDateString()}</Text>
         </View>
       </View>
@@ -445,16 +535,6 @@ export default function HomeScreen() {
             numberOfLines={6}
             textAlignVertical="top"
           />
-          <TouchableOpacity 
-              style={[styles.voiceButton, isRecording && styles.voiceButtonActive]} 
-              onPress={handleVoiceRecord}
-            >
-              <Ionicons 
-                name={isRecording ? "stop" : "mic"} 
-                size={20} 
-                color={isRecording ? "white" : "#34C759"} 
-              />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -467,52 +547,82 @@ export default function HomeScreen() {
             <Text style={styles.cleanupButtonText}>清理</Text>
           </TouchableOpacity>
         </View>
-        {recentEntries.length > 0 ? (
-          recentEntries.map((entry, index) => renderRecentEntry(entry, index))
-        ) : (
-          <Text style={styles.emptyText}>暂无记录，开始记录你的生活吧！</Text>
-        )}
+        <ScrollView style={styles.recentEntriesContainer} showsVerticalScrollIndicator={true}>
+          {recentEntries.length > 0 ? (
+            recentEntries.map((entry, index) => renderRecentEntry(entry, index))
+          ) : (
+            <Text style={styles.emptyText}>暂无记录，开始记录你的生活吧！</Text>
+          )}
+        </ScrollView>
       </View>
 
       {/* 聊天模态框 */}
       <Modal
         visible={chatModalVisible}
         animationType="slide"
-        presentationStyle="pageSheet"
+        presentationStyle="fullScreen"
       >
         <View style={styles.chatContainer}>
           <View style={styles.chatHeader}>
             <Text style={styles.chatTitle}>心语对话</Text>
-            <TouchableOpacity onPress={() => setChatModalVisible(false)}>
-              <Ionicons name="close" size={24} color="#34C759" />
+            <TouchableOpacity 
+              style={styles.closeButton}
+              onPress={() => setChatModalVisible(false)}
+            >
+              <Ionicons name="close" size={24} color="#5AC8FA" />
             </TouchableOpacity>
           </View>
           
-          <ScrollView style={styles.chatMessages}>
-            {chatMessages.map((message, index) => (
-              <View key={index} style={[
-                styles.messageContainer,
-                message.role === 'user' ? styles.userMessage : styles.aiMessage
-              ]}>
-                <View style={styles.messageHeader}>
-                  <Text style={[
-                    styles.messageText,
-                    message.role === 'user' ? styles.userMessageText : styles.aiMessageText
-                  ]}>
-                    {message.content}
-                  </Text>
-                  <TouchableOpacity 
-                    style={styles.deleteMessageButton}
-                    onPress={() => deleteChatMessage(index)}
-                  >
-                    <Ionicons name="trash-outline" size={16} color="#999999" />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.messageTime}>
-                  {message.timestamp.toLocaleTimeString()}
-                </Text>
+          <ScrollView 
+            style={styles.chatMessages}
+            contentContainerStyle={styles.chatMessagesContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {chatMessages.length === 0 ? (
+              <View style={styles.emptyChatContainer}>
+                <Ionicons name="chatbubbles-outline" size={64} color="#E0E0E0" />
+                <Text style={styles.emptyChatText}>开始你的心语对话吧</Text>
+                <Text style={styles.emptyChatSubtext}>与AI助手分享你的想法和感受</Text>
               </View>
-            ))}
+            ) : (
+              chatMessages.map((message, index) => (
+                <View key={index} style={[
+                  styles.messageContainer,
+                  message.role === 'user' ? styles.userMessage : styles.aiMessage
+                ]}>
+                  <View style={styles.messageContent}>
+                    <Text style={[
+                      styles.messageText,
+                      message.role === 'user' ? styles.userMessageText : styles.aiMessageText
+                    ]}>
+                      {message.content}
+                    </Text>
+                    <Text style={[
+                      styles.messageTime,
+                      message.role === 'user' ? styles.userMessageTime : styles.aiMessageTime
+                    ]}>
+                      {message.timestamp.toLocaleTimeString()}
+                    </Text>
+                  </View>
+                  <View style={styles.messageActions}>
+                    {message.role === 'assistant' && (
+                      <TouchableOpacity 
+                        style={styles.voiceButton}
+                        onPress={() => playMessageVoice(message)}
+                      >
+                        <Ionicons name="volume-high-outline" size={16} color="#29B6F6" />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity 
+                      style={styles.deleteMessageButton}
+                      onPress={() => deleteChatMessage(index)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#29B6F6" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
           </ScrollView>
           
           <View style={styles.chatInputContainer}>
@@ -522,8 +632,13 @@ export default function HomeScreen() {
               value={chatInput}
               onChangeText={setChatInput}
               multiline
+              maxLength={1000}
             />
-            <TouchableOpacity style={styles.sendButton} onPress={sendChatMessage}>
+            <TouchableOpacity 
+              style={[styles.sendButton, !chatInput.trim() && styles.sendButtonDisabled]} 
+              onPress={sendChatMessage}
+              disabled={!chatInput.trim()}
+            >
               <Ionicons name="send" size={20} color="white" />
             </TouchableOpacity>
           </View>
@@ -536,14 +651,15 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
+    ...webComponentStyles.mainContainer,
   },
   header: {
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: '#FFFFFF',
+    padding: platformStyles.responsive.padding,
+    paddingTop: platformStyles.safeAreaTop,
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: colors.borderLight,
   },
   titleContainer: {
     flexDirection: 'row',
@@ -555,16 +671,16 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   title: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: '#2C2C2E',
+    fontSize: fontSize.title,
+    fontWeight: platformStyles.fontWeight.heavy,
+    color: colors.text,
     letterSpacing: 0.5,
   },
   subtitle: {
-    fontSize: 18,
-    color: '#8E8E93',
+    fontSize: fontSize.xl,
+    color: colors.textSecondary,
     textAlign: 'center',
-    fontWeight: '400',
+    fontWeight: platformStyles.fontWeight.normal,
     opacity: 0.8,
   },
   mainButtons: {
@@ -576,28 +692,21 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     flex: 1,
-    backgroundColor: 'white',
-    paddingVertical: 18,
-    borderRadius: 16,
+    backgroundColor: colors.background,
+    paddingVertical: platformStyles.button.paddingVertical,
+    borderRadius: platformStyles.button.borderRadius,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: '#E5E5E7',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    borderColor: colors.border,
+    ...platformStyles.lightShadow,
   },
   primaryButtonText: {
-    color: '#2C2C2E',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
+    color: colors.text,
+    fontSize: fontSize.lg,
+    fontWeight: platformStyles.fontWeight.semibold,
+    marginLeft: spacing.sm,
   },
   secondaryButton: {
     flex: 1,
@@ -654,7 +763,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
-  voiceButton: {
+  inputVoiceButton: {
     position: 'absolute',
     right: 16,
     bottom: 16,
@@ -682,6 +791,10 @@ const styles = StyleSheet.create({
   recentSection: {
     paddingHorizontal: 20,
     marginBottom: 30,
+    flex: 1,
+  },
+  recentEntriesContainer: {
+    maxHeight: Dimensions.get('window').height * 0.4,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -734,6 +847,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666666',
     marginBottom: 4,
+    flexWrap: 'wrap',
   },
   entryDate: {
     fontSize: 12,
@@ -747,89 +861,195 @@ const styles = StyleSheet.create({
   },
   chatContainer: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8F9FA',
   },
   chatHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingTop: 60,
+    padding: platformStyles.responsive.padding,
+    paddingTop: platformStyles.safeAreaTop,
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: colors.border,
+    ...platformStyles.shadow,
   },
   chatTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000000',
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#2C2C2E',
+  },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F0F8FF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chatMessages: {
     flex: 1,
-    padding: 20,
+  },
+  chatMessagesContent: {
+    padding: 16,
+    paddingBottom: 20,
+  },
+  emptyChatContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyChatText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyChatSubtext: {
+    fontSize: 14,
+    color: '#C7C7CC',
+    textAlign: 'center',
   },
   messageContainer: {
     marginBottom: 16,
-    maxWidth: '80%',
-  },
-  messageHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    paddingHorizontal: 4,
   },
-  deleteMessageButton: {
-    padding: 4,
+  messageContent: {
+    flex: 1,
+    maxWidth: '75%',
+    minWidth: 100,
+  },
+  messageActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginLeft: 8,
-    marginTop: 8,
+    gap: 6,
   },
   userMessage: {
     alignSelf: 'flex-end',
+    flexDirection: 'row-reverse',
+    justifyContent: 'flex-start',
   },
   aiMessage: {
     alignSelf: 'flex-start',
+    justifyContent: 'flex-start',
   },
   messageText: {
     fontSize: 16,
-    padding: 12,
-    borderRadius: 12,
-    flex: 1,
+    lineHeight: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 18,
+    marginBottom: 4,
+    minWidth: 60,
+    flexShrink: 1,
   },
   userMessageText: {
-    backgroundColor: '#34C759',
+    backgroundColor: '#29B6F6',
     color: 'white',
+    borderBottomRightRadius: 6,
+    alignSelf: 'flex-end',
   },
   aiMessageText: {
-    backgroundColor: '#F0F0F0',
-    color: '#000000',
+    backgroundColor: '#FFFFFF',
+    color: '#2C2C2E',
+    borderBottomLeftRadius: 6,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+    alignSelf: 'flex-start',
   },
   messageTime: {
-    fontSize: 12,
-    color: '#999999',
-    marginTop: 4,
-    textAlign: 'center',
+    fontSize: 11,
+    marginHorizontal: 14,
+  },
+  userMessageTime: {
+    color: '#B3E5FC',
+    textAlign: 'right',
+  },
+  aiMessageTime: {
+    color: '#8E8E93',
+    textAlign: 'left',
+  },
+  voiceButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E3F2FD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#81D4FA',
+    shadowColor: '#81D4FA',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  deleteMessageButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E3F2FD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#81D4FA',
+    shadowColor: '#81D4FA',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   chatInputContainer: {
     flexDirection: 'row',
-    padding: 20,
+    padding: spacing.lg,
+    paddingBottom: platformStyles.safeAreaBottom,
+    backgroundColor: colors.background,
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopColor: colors.border,
     alignItems: 'flex-end',
   },
   chatInput: {
     flex: 1,
-    backgroundColor: '#F8F8F8',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    maxHeight: 100,
-    marginRight: 12,
+    backgroundColor: colors.chat.inputBackground,
+    borderRadius: 22,
+    paddingHorizontal: platformStyles.input.paddingHorizontal,
+    paddingVertical: platformStyles.input.paddingVertical,
+    fontSize: platformStyles.input.fontSize,
+    lineHeight: platformStyles.input.lineHeight,
+    maxHeight: 120,
+    marginRight: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#34C759',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.chat.sendButton,
     alignItems: 'center',
     justifyContent: 'center',
+    ...platformStyles.shadow,
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#C7C7CC',
+    shadowOpacity: 0,
+    elevation: 0,
   },
 });

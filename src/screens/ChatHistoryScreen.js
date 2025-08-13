@@ -37,6 +37,24 @@ export default function ChatHistoryScreen() {
 
   useEffect(() => {
     loadChatHistory();
+    
+    // 监听localStorage变化事件
+    const handleStorageChange = () => {
+      console.log('[DEBUG] ChatHistory检测到存储变化，重新加载数据');
+      loadChatHistory();
+    };
+
+    if (Platform.OS === 'web') {
+      window.addEventListener('storage', handleStorageChange);
+      window.addEventListener('localStorageUpdate', handleStorageChange);
+    }
+
+    return () => {
+      if (Platform.OS === 'web') {
+        window.removeEventListener('localStorageUpdate', handleStorageChange);
+        window.removeEventListener('storage', handleStorageChange);
+      }
+    };
   }, []);
 
   useEffect(() => {

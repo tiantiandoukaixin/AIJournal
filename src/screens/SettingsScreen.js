@@ -18,6 +18,8 @@ import DeepSeekService from '../services/DeepSeekService';
 import VoiceService from '../services/VoiceService';
 import ExportService from '../services/ExportService';
 import DatabaseService from '../services/DatabaseService';
+import { platformStyles, colors, spacing, fontSize } from '../utils/platformStyles';
+import { webComponentStyles } from '../utils/webStyles';
 
 const STORAGE_KEYS = {
   API_KEY: 'deepseek_api_key',
@@ -513,7 +515,8 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
+    ...webComponentStyles.mainContainer,
   },
   loadingContainer: {
     flex: 1,
@@ -527,9 +530,9 @@ const styles = StyleSheet.create({
     color: '#666666',
   },
   header: {
-    padding: 20,
-    paddingTop: 60,
-    backgroundColor: '#FFFFFF',
+    padding: platformStyles.responsive.padding,
+    paddingTop: platformStyles.safeAreaTop,
+    backgroundColor: colors.background,
   },
   titleContainer: {
     flexDirection: 'row',
@@ -541,16 +544,16 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   title: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: '#2C2C2E',
+    fontSize: fontSize.title,
+    fontWeight: platformStyles.fontWeight.heavy,
+    color: colors.text,
     letterSpacing: 0.5,
   },
   subtitle: {
-    fontSize: 18,
-    color: '#8E8E93',
+    fontSize: fontSize.xl,
+    color: colors.textSecondary,
     textAlign: 'center',
-    fontWeight: '400',
+    fontWeight: platformStyles.fontWeight.normal,
     opacity: 0.8,
   },
   section: {

@@ -4,18 +4,20 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
+  FlatList,
   Alert,
   Modal,
-  FlatList,
-  RefreshControl,
-  ActivityIndicator,
   TextInput,
+  ScrollView,
+  ActivityIndicator,
+  RefreshControl,
   Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DatabaseService from '../services/DatabaseService';
 import ExportService from '../services/ExportService';
+import { platformStyles, colors, spacing, fontSize } from '../utils/platformStyles';
+import { webComponentStyles } from '../utils/webStyles';
 
 const TABLE_CONFIGS = {
   personal_info: {
@@ -80,10 +82,14 @@ export default function DatabaseScreen() {
   useEffect(() => {
     loadTableCounts();
     
-    // 监听localStorage变化，自动刷新表统计
+    // 监听localStorage变化，自动刷新表统计和当前表数据
     const handleStorageChange = () => {
-      console.log('🔄 检测到localStorage变化，刷新表统计...');
+      console.log('🔄 检测到localStorage变化，刷新表统计和数据...');
       loadTableCounts();
+      // 如果当前有选中的表，也刷新表数据
+      if (selectedTable) {
+        loadTableData(selectedTable);
+      }
     };
     
     // 添加storage事件监听器
@@ -1685,7 +1691,8 @@ export default function DatabaseScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
+    ...webComponentStyles.mainContainer,
   },
   header: {
     padding: 20,

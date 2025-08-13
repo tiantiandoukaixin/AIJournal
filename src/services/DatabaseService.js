@@ -20,12 +20,40 @@ class DatabaseService {
         return true;
       }
       
-      this.db = await SQLite.openDatabaseAsync('aijournal.db');
+      // 检查SQLite是否可用
+      if (!SQLite) {
+        console.warn('SQLite模块未加载，切换到内存存储模式');
+        this.isWeb = true;
+        return true;
+      }
+      
+      console.log('正在初始化数据库...');
+      
+      // 尝试打开数据库，设置超时
+      const dbPromise = SQLite.openDatabaseAsync('aijournal.db');
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('数据库连接超时')), 5000)
+      );
+      
+      this.db = await Promise.race([dbPromise, timeoutPromise]);
+      
+      if (!this.db) {
+        throw new Error('数据库连接失败');
+      }
+      
+      console.log('数据库连接成功，正在创建表...');
       await this.createTables();
-      console.log('数据库初始化成功');
+      console.log('✅ SQLite数据库初始化成功');
       return true;
     } catch (error) {
-      console.error('数据库初始化失败:', error);
+      console.error('❌ SQLite数据库初始化失败:', error.message);
+      // 在手机端，如果数据库初始化失败，自动切换到内存存储作为备用方案
+      if (Platform.OS !== 'web') {
+        console.log('🔄 自动切换到内存存储模式...');
+        this.isWeb = true; // 设置为web模式使用localStorage替代方案
+        console.log('✅ 内存存储模式启用成功');
+        return true;
+      }
       return false;
     }
   }
@@ -667,6 +695,12 @@ class DatabaseService {
       }
 
       await this.db.runAsync(`DELETE FROM ${tableName}`);
+      // 在非Web环境下也触发事件通知界面刷新
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('localStorageUpdate', { 
+          detail: { tableName, dataLength: 0 } 
+        }));
+      }
       return true;
     } catch (error) {
       console.error(`清空${tableName}表失败:`, error);
@@ -676,7 +710,7 @@ class DatabaseService {
 
   // 清空所有数据
   async clearAllData() {
-    const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'chat_history'];
+    const tables = ['personal_info', 'preferences', 'milestones', 'moods', 'thoughts', 'food_records', 'chat_history'];
     try {
       for (const table of tables) {
         await this.clearTable(table);
@@ -742,6 +776,31 @@ class DatabaseService {
     } catch (error) {
       console.error('❌ 插入聊天记录失败:', error);
       throw error;
+    }
+  }
+
+  // 删除聊天记录
+  async deleteChatMessage(messageId) {
+    try {
+      console.log('🗑️ 开始删除聊天记录, ID:', messageId);
+      
+      if (this.isWeb) {
+        const data = this.getWebData('chat_history');
+        const filteredData = data.filter(item => String(item.id) !== String(messageId));
+        this.setWebData('chat_history', filteredData);
+        console.log('✅ Web环境聊天记录删除成功, 剩余数量:', filteredData.length);
+        return { success: true, deletedCount: data.length - filteredData.length };
+      }
+
+      const result = await this.db.runAsync(
+        'DELETE FROM chat_history WHERE id = ?',
+        [messageId]
+      );
+      console.log('✅ SQLite聊天记录删除成功, 删除数量:', result.changes);
+      return { success: true, deletedCount: result.changes };
+    } catch (error) {
+      console.error('❌ 删除聊天记录失败:', error);
+      return { success: false, error: error.message };
     }
   }
 

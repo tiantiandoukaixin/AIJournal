@@ -1,15 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, ActivityIndicator } from 'react-native';
-
+import DatabaseService from './src/services/DatabaseService';
 import HomeScreen from './src/screens/HomeScreen';
 import DatabaseScreen from './src/screens/DatabaseScreen';
 import ChatHistoryScreen from './src/screens/ChatHistoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
-import DatabaseService from './src/services/DatabaseService';
+import { platformStyles, colors, spacing, fontSize } from './src/utils/platformStyles';
 
 const Tab = createBottomTabNavigator();
 
@@ -66,19 +66,20 @@ export default function App() {
 
             return <Ionicons name={iconName} size={size} color={color} />;
           },
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#8E8E93',
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.textSecondary,
           tabBarStyle: {
-            backgroundColor: '#FFFFFF',
+            backgroundColor: colors.background,
             borderTopWidth: 1,
-            borderTopColor: '#E0E0E0',
-            paddingBottom: 5,
-            paddingTop: 5,
+            borderTopColor: colors.border,
+            paddingBottom: spacing.xs + 1,
+            paddingTop: spacing.xs + 1,
             height: 60,
+            ...platformStyles.lightShadow,
           },
           tabBarLabelStyle: {
-            fontSize: 12,
-            fontWeight: '500',
+            fontSize: fontSize.sm,
+            fontWeight: platformStyles.fontWeight.medium,
           },
           headerShown: false,
         })}
